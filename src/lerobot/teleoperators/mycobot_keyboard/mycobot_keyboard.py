@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from lerobot.teleoperators.teleoperator import Teleoperator, TeleoperatorConfig
 from lerobot.teleoperators.mycobot_keyboard.config_mycobot_keyboard import MyCobotKeyboardConfig
 
+# TODO 改成笛卡尔控制
 class MyCobotKeyboard(Teleoperator):
     config_class = MyCobotKeyboardConfig
     name = "mycobot_keyboard"
