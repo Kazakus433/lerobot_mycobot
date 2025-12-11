@@ -16,7 +16,7 @@ from lerobot.cameras.realsense.configuration_realsense import RealSenseCameraCon
 class MycobotPro630Config(RobotConfig):
     # 机械臂 TCP 配置
     type: str = "mycobot_pro630"
-    ip: str = "192.168.3.58"  # 你的机械臂 IP
+    ip: str = "10.194.2.22"  # 你的机械臂 IP
     port: int = 5001  # Pro 630 默认端口
 
     # 夹爪 串口 配置

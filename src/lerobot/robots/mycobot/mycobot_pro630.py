@@ -39,7 +39,8 @@ class MycobotPro630(Robot):
         return {f"joint_{i}.pos": float for i in range(1, 7)} | {"gripper.pos": float}
 
     # 初始化机械臂，夹爪摄像机
-    def connect(self):
+    #def connect(self):
+    def connect(self, calibrate: bool = True):
         print(f"Connecting to Arm at {self.config.ip}:{self.config.port}...")
         try:
             self.arm = ElephantRobot(self.config.ip, self.config.port)
@@ -64,10 +65,14 @@ class MycobotPro630(Robot):
             #)
 
             for cam in self.cameras.values():
+                print(cam)
                 cam.connect()
 
             self._is_connected = True
             print("All hardware connected successfully.")
+
+            if calibrate:
+                self.configure()
 
         except Exception as e:
             print(f"Connection failed: {e}")
@@ -77,7 +82,7 @@ class MycobotPro630(Robot):
     def disconnect(self):
         if self.arm:
             self.arm = None  # 根据 SDK 情况，可能有专门的 close 方法
-        if self.gripper and self.gripper.is_open:
+        if self.gripper:
             self.gripper.close()
         for cam in self.cameras.values():
             cam.disconnect()
@@ -94,6 +99,17 @@ class MycobotPro630(Robot):
     def calibrate(self):
         pass
 
+    def configure(self) -> None:
+        """Apply a minimal runtime configuration for the arm and gripper."""
+
+        if not self.is_connected:
+            raise ConnectionError("Robot not connected")
+
+        if self.config.start_position_angle and len(self.config.start_position_angle) == 6:
+            print("Moving to configured start position...")
+            self.arm.write_angles(self.config.start_position_angle, 1000)
+        else:
+            print("No start position configured; skipping arm preset.")
     # =========================================================
     # 修改点 1: 读取时直接使用角度
     # =========================================================
