@@ -1,17 +1,11 @@
-import time
-import numpy as np
-import serial
+
 from dataclasses import dataclass, field
-from typing import Dict, Any
 
 from lerobot.cameras import ColorMode
 # 引入 Lerobot 基础类
-from lerobot.robots import Robot, RobotConfig
+from lerobot.robots import RobotConfig
 from lerobot.cameras.realsense.configuration_realsense import RealSenseCameraConfig
 
-# 引入硬件驱动 (假设使用 pymycobot 作为底层驱动简化 TCP 通信)
-# 如果你是手写 socket，请替换这里的 ElephantRobot 调用
-from pymycobot import ElephantRobot
 
 
 # =========================================================
@@ -19,10 +13,11 @@ from pymycobot import ElephantRobot
 # =========================================================
 @RobotConfig.register_subclass("mycobot_pro630")
 @dataclass
-class MyCobotPro630Config(RobotConfig):
+class MycobotPro630Config(RobotConfig):
     # 机械臂 TCP 配置
-    arm_ip: str = "10.194.18.232"  # 你的机械臂 IP
-    arm_port: int = 5001  # Pro 630 默认端口
+    type: str = "mycobot_pro630"
+    ip: str = "192.168.3.58"  # 你的机械臂 IP
+    port: int = 5001  # Pro 630 默认端口
 
     # 夹爪 串口 配置
     gripper_port: str = "com3"  # Linux 下通常是这个，Windows 下是 COMx

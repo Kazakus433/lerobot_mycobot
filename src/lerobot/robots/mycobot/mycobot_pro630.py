@@ -6,22 +6,24 @@ from typing import Dict, Any
 
 from lerobot.robots import Robot, RobotConfig
 from lerobot.cameras import CameraConfig, make_cameras_from_configs
+from lerobot.robots.mycobot.elegripper import Gripper
 # 假设你的配置文件名字是这个
-from lerobot.robots.mycobot.config_mycobot import MyCobotPro630Config
+from lerobot.robots.mycobot.config_mycobot import MycobotPro630Config
 from pymycobot import ElephantRobot
 
 
-class MyCobotPro630(Robot):
-    config_class = MyCobotPro630Config
+class MycobotPro630(Robot):
+    config_class = MycobotPro630Config
     name = "mycobot_pro630"
 
-    def __init__(self, config: MyCobotPro630Config):
+    def __init__(self, config: MycobotPro630Config):
         super().__init__(config)
         self.config = config
 
         self.arm = None
         self.gripper = None
         self._is_connected = False
+        # 摄像头添加配置
         self.cameras = make_cameras_from_configs(config.cameras)
 
     @property
@@ -36,10 +38,11 @@ class MyCobotPro630(Robot):
     def action_features(self) -> dict:
         return {f"joint_{i}.pos": float for i in range(1, 7)} | {"gripper.pos": float}
 
+    # 初始化机械臂，夹爪摄像机
     def connect(self):
-        print(f"Connecting to Arm at {self.config.arm_ip}:{self.config.arm_port}...")
+        print(f"Connecting to Arm at {self.config.ip}:{self.config.port}...")
         try:
-            self.arm = ElephantRobot(self.config.arm_ip, self.config.arm_port)
+            self.arm = ElephantRobot(self.config.ip, self.config.port)
             self.arm.start_client()
             time.sleep(1)
             self.arm.start_robot()
@@ -51,11 +54,14 @@ class MyCobotPro630(Robot):
                 raise ConnectionError("Failed to connect to mycobot")
 
             print(f"Connecting to Gripper...")
-            self.gripper = serial.Serial(
-                port=self.config.gripper_port,
-                baudrate=self.config.gripper_baudrate,
-                timeout=0.1
-            )
+
+            self.gripper = Gripper(self.config.gripper_port, self.config.gripper_baudrate, id=14)
+
+            #self.gripper = serial.Serial(
+            #    port=self.config.gripper_port,
+            #    baudrate=self.config.gripper_baudrate,
+            #    timeout=0.1
+            #)
 
             for cam in self.cameras.values():
                 cam.connect()

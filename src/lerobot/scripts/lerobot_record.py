@@ -57,7 +57,6 @@ lerobot-record \
   --dataset.single_task="Grab and handover the red cube to the other arm"
 ```
 """
-
 import logging
 import time
 from dataclasses import asdict, dataclass, field
@@ -98,6 +97,7 @@ from lerobot.robots import (  # noqa: F401
     make_robot_from_config,
     so100_follower,
     so101_follower,
+    mycobot,
 )
 from lerobot.teleoperators import (  # noqa: F401
     Teleoperator,
@@ -108,6 +108,7 @@ from lerobot.teleoperators import (  # noqa: F401
     make_teleoperator_from_config,
     so100_leader,
     so101_leader,
+    mycobot_keyboard,
 )
 from lerobot.teleoperators.keyboard.teleop_keyboard import KeyboardTeleop
 from lerobot.utils.constants import ACTION, OBS_STR

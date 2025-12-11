@@ -61,8 +61,8 @@ def make_robot_from_config(config: RobotConfig) -> Robot:
 
         return MockRobot(config)
     elif config.type == "mycobot_pro630":
-        from .mycobot import MyCobotPro630
-        return MyCobotPro630(config)
+        from .mycobot import MycobotPro630
+        return MycobotPro630(config)
     else:
         try:
             return cast(Robot, make_device_from_device_class(config))
