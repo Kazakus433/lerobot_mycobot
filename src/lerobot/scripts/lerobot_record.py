@@ -57,6 +57,7 @@ lerobot-record \
   --dataset.single_task="Grab and handover the red cube to the other arm"
 ```
 """
+from datetime import datetime
 import logging
 import time
 from dataclasses import asdict, dataclass, field
@@ -344,7 +345,10 @@ def record_loop(
         # Applies a pipeline to the action, default is IdentityProcessor
         if policy is not None and act_processed_policy is not None:
             action_values = act_processed_policy
+            # 报错代码
             robot_action_to_send = robot_action_processor((act_processed_policy, obs))
+            #print("robot_action_to_send")
+            #print(robot_action_to_send)
         else:
             action_values = act_processed_teleop
             robot_action_to_send = robot_action_processor((act_processed_teleop, obs))
@@ -370,6 +374,7 @@ def record_loop(
         timestamp = time.perf_counter() - start_episode_t
 
 
+# 核心函数
 @parser.wrap()
 def record(cfg: RecordConfig) -> LeRobotDataset:
     init_logging()
@@ -380,8 +385,10 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
     robot = make_robot_from_config(cfg.robot)
     teleop = make_teleoperator_from_config(cfg.teleop) if cfg.teleop is not None else None
 
+    # 数据处理
     teleop_action_processor, robot_action_processor, robot_observation_processor = make_default_processors()
 
+    # 特征
     dataset_features = combine_feature_dicts(
         aggregate_pipeline_dataset_features(
             pipeline=teleop_action_processor,
@@ -411,6 +418,9 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
             )
         sanity_check_dataset_robot_compatibility(dataset, robot, cfg.dataset.fps, dataset_features)
     else:
+        # 用时间戳来命名数据集，防止覆盖之前的数据集
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        cfg.dataset.repo_id = f"{cfg.dataset.repo_id}_{timestamp}"
         # Create empty dataset or load existing saved episodes
         sanity_check_dataset_name(cfg.dataset.repo_id, cfg.policy)
         dataset = LeRobotDataset.create(
@@ -425,6 +435,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
             batch_encoding_size=cfg.dataset.video_encoding_batch_size,
         )
 
+    # 调用模型
     # Load pretrained policy
     policy = None if cfg.policy is None else make_policy(cfg.policy, ds_meta=dataset.meta)
     preprocessor = None

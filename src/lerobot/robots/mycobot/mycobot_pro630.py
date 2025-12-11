@@ -36,7 +36,8 @@ class MycobotPro630(Robot):
 
     @property
     def action_features(self) -> dict:
-        return {f"joint_{i}.pos": float for i in range(1, 7)} | {"gripper.pos": float}
+        # return {f"joint_{i}.pos": float for i in range(1, 7)} | {"gripper.pos": float}
+        return {f"joint_{i}.pos": float for i in range(1, 6)}
 
     # 初始化机械臂，夹爪摄像机
     #def connect(self):
@@ -163,9 +164,3 @@ class MycobotPro630(Robot):
                 pass  # open
 
         return action
-
-    def reset(self):
-        # 确保 start_position_angle 配置里填的也是角度值
-        self.arm.write_angles(self.config.start_position_angle, 800)
-        # 注意：原代码用了 set_joint，Pro 630 SDK 通常用 write_angles 或 write_coords
-        print("回到初始位置")

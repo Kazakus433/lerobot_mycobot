@@ -16,7 +16,7 @@ from lerobot.cameras.realsense.configuration_realsense import RealSenseCameraCon
 class MycobotPro630Config(RobotConfig):
     # 机械臂 TCP 配置
     type: str = "mycobot_pro630"
-    ip: str = "10.194.2.22"  # 你的机械臂 IP
+    ip: str = "10.194.21.62"  # 你的机械臂 IP
     port: int = 5001  # Pro 630 默认端口
 
     # 夹爪 串口 配置
@@ -24,18 +24,18 @@ class MycobotPro630Config(RobotConfig):
     gripper_baudrate: int = 115200
 
     start_position_angle = [
-        0.0,  # Joint 1
-        -140.0,  # Joint 2
-        120.9,  # Joint 3
-        -85.5,  # Joint 4
-        -92.5,  # Joint 5
-        -23.5,  # Joint 6
+        156.5,  # Joint 1
+        106.0,  # Joint 2
+        121.5,  # Joint 3
+        -59.0,  # Joint 4
+        -8.5,  # Joint 5
+        -6.2,  # Joint 6
     ]
 
     # 默认相机配置
     cameras: dict[str, RealSenseCameraConfig] = field(
         default_factory=lambda: {
-            "cam_1": RealSenseCameraConfig(
+            "camera1": RealSenseCameraConfig(
                 serial_number_or_name="344422070499",  # 记得替换成你的真实序列号
                 width=640,
                 height=480,
@@ -44,7 +44,7 @@ class MycobotPro630Config(RobotConfig):
                 color_mode=ColorMode.RGB,
                 warmup_s=2
             ),
-            "cam_2": RealSenseCameraConfig(
+            "camera2": RealSenseCameraConfig(
                 serial_number_or_name="327122078359",  # 记得替换成你的真实序列号
                 width=640,
                 height=480,
