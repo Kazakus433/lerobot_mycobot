@@ -193,10 +193,15 @@ def make_robot_action(action_tensor: PolicyAction, ds_features: dict[str, dict])
     action_tensor = action_tensor.squeeze(0)
     action_tensor = action_tensor.to("cpu")
 
+    print("action_tensor")
+    print(action_tensor)
+
     action_names = ds_features[ACTION]["names"]
-    # dcy
-    # for name in action_names:
-    #    print(name)
+
+    # 暂时删除gripper.pos
+    if "gripper.pos" in action_names:
+        action_names.remove("gripper.pos")
+
     act_processed_policy: RobotAction = {
         f"{name}": float(action_tensor[i]) for i, name in enumerate(action_names)
     }

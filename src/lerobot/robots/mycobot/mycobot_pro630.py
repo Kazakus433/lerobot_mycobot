@@ -36,8 +36,7 @@ class MycobotPro630(Robot):
 
     @property
     def action_features(self) -> dict:
-        # return {f"joint_{i}.pos": float for i in range(1, 7)} | {"gripper.pos": float}
-        return {f"joint_{i}.pos": float for i in range(1, 6)}
+        return {f"joint_{i}.pos": float for i in range(1, 7)} | {"gripper.pos": float}
 
     # 初始化机械臂，夹爪摄像机
     #def connect(self):

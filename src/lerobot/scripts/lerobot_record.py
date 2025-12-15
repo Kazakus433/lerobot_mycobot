@@ -347,8 +347,8 @@ def record_loop(
             action_values = act_processed_policy
             # 报错代码
             robot_action_to_send = robot_action_processor((act_processed_policy, obs))
-            #print("robot_action_to_send")
-            #print(robot_action_to_send)
+            # print("robot_action_to_send")
+            # print(robot_action_to_send)
         else:
             action_values = act_processed_teleop
             robot_action_to_send = robot_action_processor((act_processed_teleop, obs))

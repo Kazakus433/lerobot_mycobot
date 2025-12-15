@@ -290,6 +290,8 @@ class DataProcessorPipeline(HubMixin, Generic[TInput, TOutput]):
         Returns:
             The processed data in the specified output format.
         """
+        #print("data")
+        #print(data)
         transition = self.to_transition(data)
         transformed_transition = self._forward(transition)
         return self.to_output(transformed_transition)
