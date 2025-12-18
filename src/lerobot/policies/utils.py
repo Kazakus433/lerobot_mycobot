@@ -193,8 +193,8 @@ def make_robot_action(action_tensor: PolicyAction, ds_features: dict[str, dict])
     action_tensor = action_tensor.squeeze(0)
     action_tensor = action_tensor.to("cpu")
 
-    print("action_tensor")
-    print(action_tensor)
+    # print("action_tensor")
+    # print(action_tensor)
 
     action_names = ds_features[ACTION]["names"]
 

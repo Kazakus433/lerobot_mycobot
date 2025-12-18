@@ -302,8 +302,12 @@ def record_loop(
 
         # Applies a pipeline to the raw robot observation, default is IdentityProcessor
         obs_processed = robot_observation_processor(obs)
+        #print("obs_processed")
+        #print(obs_processed)
 
         if policy is not None or dataset is not None:
+            #print("dataset.features")
+            #print(dataset.features)
             observation_frame = build_dataset_frame(dataset.features, obs_processed, prefix=OBS_STR)
 
         # Get action from either policy or teleop
@@ -357,10 +361,14 @@ def record_loop(
         # Action can eventually be clipped using `max_relative_target`,
         # so action actually sent is saved in the dataset. action = postprocessor.process(action)
         # TODO(steven, pepijn, adil): we should use a pipeline step to clip the action, so the sent action is the action that we input to the robot.
-        _sent_action = robot.send_action(robot_action_to_send)
+        # TODO 采集数据不要运行send_action
+        if policy is not None and act_processed_policy is not None:
+            _sent_action = robot.send_action(robot_action_to_send)
+        # _sent_action = robot.send_action(robot_action_to_send)
 
         # Write to dataset
         if dataset is not None:
+
             action_frame = build_dataset_frame(dataset.features, action_values, prefix=ACTION)
             frame = {**observation_frame, **action_frame, "task": single_task}
             dataset.add_frame(frame)
