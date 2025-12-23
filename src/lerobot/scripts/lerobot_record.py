@@ -327,14 +327,17 @@ def record_loop(
 
         elif policy is None and isinstance(teleop, Teleoperator):
             act = teleop.get_action()
+            #print(f"act:{act}")
 
             # Applies a pipeline to the raw teleop action, default is IdentityProcessor
             act_processed_teleop = teleop_action_processor((act, obs))
+            #print(f"act_processed_teleop:{act_processed_teleop}")
 
         elif policy is None and isinstance(teleop, list):
             arm_action = teleop_arm.get_action()
             arm_action = {f"arm_{k}": v for k, v in arm_action.items()}
             keyboard_action = teleop_keyboard.get_action()
+            print(f"keyboard_action:{keyboard_action}")
             base_action = robot._from_keyboard_to_base_action(keyboard_action)
             act = {**arm_action, **base_action} if len(base_action) > 0 else arm_action
             act_processed_teleop = teleop_action_processor((act, obs))
@@ -348,12 +351,14 @@ def record_loop(
 
         # Applies a pipeline to the action, default is IdentityProcessor
         if policy is not None and act_processed_policy is not None:
+            # 预测的action
             action_values = act_processed_policy
             # 报错代码
             robot_action_to_send = robot_action_processor((act_processed_policy, obs))
             # print("robot_action_to_send")
             # print(robot_action_to_send)
         else:
+            # 遥操作的action
             action_values = act_processed_teleop
             robot_action_to_send = robot_action_processor((act_processed_teleop, obs))
 
@@ -362,9 +367,9 @@ def record_loop(
         # so action actually sent is saved in the dataset. action = postprocessor.process(action)
         # TODO(steven, pepijn, adil): we should use a pipeline step to clip the action, so the sent action is the action that we input to the robot.
         # TODO 采集数据不要运行send_action
-        if policy is not None and act_processed_policy is not None:
-            _sent_action = robot.send_action(robot_action_to_send)
-        # _sent_action = robot.send_action(robot_action_to_send)
+        #if policy is not None and act_processed_policy is not None:
+        #    _sent_action = robot.send_action(robot_action_to_send)
+        _sent_action = robot.send_action(robot_action_to_send)
 
         # Write to dataset
         if dataset is not None:

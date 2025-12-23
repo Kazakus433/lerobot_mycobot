@@ -162,7 +162,7 @@ class MycobotPro630(Robot):
         # --- A. 控制机械臂 ---
         # 1. 提取目标弧度值 (Radians)
         target_rad = [action[f"joint_{i}.pos"] for i in range(1, 7)]
-        gripper_value = int(action["gripper.pos"].item() * 100)
+        gripper_value = int((action["gripper.pos"].item() if hasattr(action["gripper.pos"], "item") else action["gripper.pos"]) * 100)
         #target_list = [t.item() if hasattr(t, "item") else t for t in target_rad]
         # 2. 【转换】 弧度 -> 角度 (np.rad2deg)
         # 机械臂 SDK 需要角度

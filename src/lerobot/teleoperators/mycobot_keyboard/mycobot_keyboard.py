@@ -1,14 +1,13 @@
 import time
 import numpy as np
 import pygame
-import threading
-import queue
 from typing import Any
+
 from lerobot.teleoperators.teleoperator import Teleoperator
 from lerobot.teleoperators.mycobot_keyboard.config_mycobot_keyboard import MyCobotKeyboardConfig
 from lerobot.utils.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
 
-# 引入 Robot 类用于获取实例
+# 仅在连接时引入 Robot 类，用于同步初始位置
 from lerobot.robots.mycobot.mycobot_pro630 import MycobotPro630
 
 
@@ -16,45 +15,45 @@ class MyCobotKeyboard(Teleoperator):
     config_class = MyCobotKeyboardConfig
     name = "mycobot_keyboard"
 
-    # 类变量初始化
-    mycobot = None
-    ec = None
-    gripper_controller = None
-    step = 10
-
     def __init__(self, config: MyCobotKeyboardConfig):
         super().__init__(config)
         self.config = config
 
         self._is_connected = False
-        self._is_calibrated = False
 
-        # --- 移植旧代码的变量 ---
+        # --- 核心状态变量 ---
+        # virtual_joint_positions: 当前计算出的目标位置（实时变动）
+        # initial_joint_positions: 连接时的初始位置（固定不变，用于复位）
+        self.virtual_joint_positions = None
+        self.initial_joint_positions = None
+
+        self.virtual_gripper_pos = 0  # 0.0(开) ~ 1.0(关)
+        self.initial_gripper_pos = 0
+
+        # --- 参数设置 ---
+        # 手动控制灵敏度：每次按键调整的弧度值
+        self.move_step_rad = 0.02
+        self.gripper_step = 0.1
+
+        # 【新增】自动复位参数
+        self.is_resetting = False  # 是否正在复位中
+        self.reset_step_rad = 0.05  # 复位时的自动移动速度（建议比手动稍快）
+
+        # 关节限制 (弧度)，防止超出机械臂物理极限
+        # 对应 J1 到 J6
+        self.joint_limits = {
+            'min': [-3.14, -3.14, -3.14, -3.14, -3.14, -3.14],
+            'max': [3.14, 3.14, 3.14, 3.14, 3.14, 3.14]
+        }
+
+        # Pygame 相关
         self.pressed_keys = set()
-        self.last_action_time = {}
+        self.screen = None
         self.KEY_MAP = {}
-
-        # 配置参数
-        self.action_interval = 0.05
-        self.gripper_interval = 0.05
-        self.global_speed = 3000
-        self.rspeed = 1000
-        self.gripper_speed = 100
-
-        # 夹爪状态维护
-        self.current_gripper_value = 50
-
-        # --- 多线程相关 ---
-        self.gripper_queue = queue.Queue()
-        self.worker_running = False
-        self.worker_thread = None
-
-        # 【新增优化】关节角度缓存与读取线程
-        self.reader_thread = None
-        self.cached_angles = [0.0] * 6  # 用于存储最新的真实角度
 
     @property
     def action_features(self) -> dict:
+        # 定义数据格式：6个关节 + 1个夹爪
         return {f"joint_{i}.pos": float for i in range(1, 7)} | {"gripper.pos": float}
 
     @property
@@ -65,121 +64,85 @@ class MyCobotKeyboard(Teleoperator):
     def is_connected(self) -> bool:
         return self._is_connected
 
-    @property
-    def is_calibrated(self) -> bool:
-        return self._is_calibrated
-
-    # --- 后台工作线程：夹爪写入 ---
-    def _gripper_worker(self):
-        """负责写入夹爪指令，防止阻塞主线程"""
-        while self.worker_running:
-            try:
-                val, speed = self.gripper_queue.get(timeout=0.1)
-
-                # 贪婪消费：只执行最新的一条指令
-                last_val, last_speed = val, speed
-                while not self.gripper_queue.empty():
-                    try:
-                        last_val, last_speed = self.gripper_queue.get_nowait()
-                        self.gripper_queue.task_done()
-                    except queue.Empty:
-                        break
-
-                if self.gripper_controller:
-                    self.gripper_controller.set_gripper_value(last_val, last_speed)
-
-                self.gripper_queue.task_done()
-
-            except queue.Empty:
-                continue
-            except Exception as e:
-                print(f"夹爪线程错误: {e}")
-
-    # --- 【新增优化】后台工作线程：关节读取 ---
-    def _joint_reader_worker(self):
-        """
-        负责不停地读取关节角度。
-        get_angles() 是阻塞的，但因为它在独立线程里跑，
-        所以不会卡住键盘控制的主循环。
-        """
-        while self.worker_running:
-            try:
-                if self.ec:
-                    # 这里依然是耗时的，但无所谓，不影响主线程
-                    angles = self.ec.get_angles()
-                    if angles and len(angles) == 6:
-                        self.cached_angles = angles
-
-                # 稍微休眠一下，避免死循环占用过多CPU，同时也给串口喘息机会
-                time.sleep(0.01)
-            except Exception as e:
-                # 忽略读取错误，保持上一次的值
-                # print(f"读取角度错误: {e}")
-                time.sleep(0.1)
-
-    def connect(self, calibrate: bool = True):
+    def connect(self):
         if self.is_connected:
             raise DeviceAlreadyConnectedError("Already connected.")
 
         pygame.init()
 
+        # --- 1. 设置按键映射 (关节控制模式) ---
         self.KEY_MAP = {
-            'move_x_forward': pygame.K_w, 'move_x_backward': pygame.K_s,
-            'move_y_right': pygame.K_d, 'move_y_left': pygame.K_a,
-            'move_z_up': pygame.K_q, 'move_z_down': pygame.K_e,
-            'rotate_rx_positive': pygame.K_y, 'rotate_rx_negative': pygame.K_h,
-            'rotate_ry_positive': pygame.K_t, 'rotate_ry_negative': pygame.K_u,
-            'rotate_rz_positive': pygame.K_g, 'rotate_rz_negative': pygame.K_j,
-            'gripper_open': pygame.K_r, 'gripper_close': pygame.K_f,
-            'to_init': pygame.K_z, 'stop': pygame.K_x,
+            # 关节 1 (底座) - A/D
+            'j1_pos': pygame.K_a, 'j1_neg': pygame.K_d,
+            # 关节 2 (大臂) - W/S
+            'j2_pos': pygame.K_w, 'j2_neg': pygame.K_s,
+            # 关节 3 (小臂) - E/Q
+            'j3_pos': pygame.K_e, 'j3_neg': pygame.K_q,
+            # 关节 4 (旋转) - H/Y
+            'j4_pos': pygame.K_h, 'j4_neg': pygame.K_y,
+            # 关节 5 (手腕) - T/U
+            'j5_pos': pygame.K_t, 'j5_neg': pygame.K_u,
+            # 关节 6 (末端) - J/G
+            'j6_pos': pygame.K_j, 'j6_neg': pygame.K_g,
+            # 夹爪 - F/R
+            'gripper_close': pygame.K_f, 'gripper_open': pygame.K_r,
+            # 功能键
+            'to_init': pygame.K_z,  # 复位键
+            'debug': pygame.K_p,  # 复位键
+            'stop': pygame.K_ESCAPE,  # 退出键
         }
 
+        # --- 2. 初始化 Pygame 窗口 ---
         self.screen = pygame.display.set_mode((400, 300))
-        pygame.display.set_caption("机械臂键盘控制 - 双线程极速版")
-
+        pygame.display.set_caption("MyCobot Keyboard (Smooth Reset Mode)")
         font = pygame.font.SysFont(None, 24)
-        text = font.render("Click window to focus.", True, (255, 255, 255))
+        text = font.render("Controls: QWEASD... Z to Smooth Reset", True, (255, 255, 255))
         self.screen.blit(text, (20, 20))
         pygame.display.flip()
 
-        self._is_connected = True
-        self._is_calibrated = True
-        print("🎮 Connected! Dual-threading enabled (Read+Write).")
-
-        self.mycobot = MycobotPro630.get_instance()
-        self.ec = self.mycobot.arm
-        self.gripper_controller = self.mycobot.gripper
-
-        # 初始同步
+        # --- 3. 关键步骤：同步并保存初始状态 ---
+        print("正在读取机械臂初始姿态...")
         try:
-            init_val = self.gripper_controller.get_gripper_value()
-            if init_val is not None: self.current_gripper_value = init_val
+            # 获取实例读取真实角度
+            robot_instance = MycobotPro630.get_instance()
 
-            init_angles = self.ec.get_angles()
-            if init_angles: self.cached_angles = init_angles
-        except:
-            pass
+            # 读取真实角度 (角度制 -> 弧度制)
+            real_angles = robot_instance.arm.get_angles()
+            if not real_angles:
+                real_angles = [0.0] * 6
+                print("⚠️ 警告: 无法读取初始角度，默认为 0")
 
-        self.worker_running = True
+            # 1. 初始化当前虚拟状态
+            self.virtual_joint_positions = np.deg2rad(real_angles).tolist()
 
-        # 启动夹爪写入线程
-        self.worker_thread = threading.Thread(target=self._gripper_worker, daemon=True)
-        self.worker_thread.start()
+            # 2. 【核心】备份初始状态 (深拷贝)
+            self.initial_joint_positions = list(self.virtual_joint_positions)
 
-        # 【新增优化】启动关节读取线程
-        self.reader_thread = threading.Thread(target=self._joint_reader_worker, daemon=True)
-        self.reader_thread.start()
+            # 读取夹爪
+            g_val = robot_instance.gripper.get_gripper_value()
+            current_g = (g_val / 100.0) if g_val is not None else 0.5
+
+            self.virtual_gripper_pos = current_g
+            self.initial_gripper_pos = current_g
+
+            print(f"✅ 同步成功! 初始弧度: {np.round(self.virtual_joint_positions, 2)}")
+
+        except Exception as e:
+            print(f"❌ 读取错误 (使用默认零位): {e}")
+            self.virtual_joint_positions = [0.0] * 6
+            self.initial_joint_positions = [0.0] * 6
+            self.virtual_gripper_pos = 0.5
+            self.initial_gripper_pos = 0.5
+
+        self._is_connected = True
+        self.is_resetting = False
 
     def disconnect(self):
         if self._is_connected:
-            self.worker_running = False
-
-            # 等待两个线程结束
-            if self.worker_thread: self.worker_thread.join(timeout=1.0)
-            if self.reader_thread: self.reader_thread.join(timeout=1.0)
-
             pygame.quit()
             self._is_connected = False
+            self.is_resetting = False
+            print("Teleop disconnected.")
 
     def calibrate(self) -> None:
         pass
@@ -187,153 +150,139 @@ class MyCobotKeyboard(Teleoperator):
     def configure(self) -> None:
         pass
 
+    def is_calibrated(self) -> bool:
+        return True
+
     def get_action(self) -> dict[str, Any]:
+        """
+        计算下一帧的动作：
+        - 纯数学计算，不读取硬件 IO
+        - 支持 Z 键平滑复位 (避免数据突变)
+        """
         if not self.is_connected:
             raise DeviceNotConnectedError("Not connected.")
 
-        current_time = time.time()
-
-        # =========================================================
-        # 第一部分：事件处理
-        # =========================================================
+        # ==========================
+        # 1. Pygame 事件处理
+        # ==========================
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.disconnect()
                 return {}
             elif event.type == pygame.KEYDOWN:
-                key = event.key
-                if key == pygame.K_ESCAPE:
+                if event.key == self.KEY_MAP['stop']:
                     self.disconnect()
                     return {}
-                elif key == self.KEY_MAP['to_init']:
-                    print("回到初始化位置")
-                    try:
-                        self.mycobot.configure()
-                    except:
-                        pass
-                self.pressed_keys.add(key)
+
+                # 按下 Z 键，开启归位模式，而不是直接赋值
+                if event.key == self.KEY_MAP['to_init']:
+                    self.is_resetting = True
+                    print("🔄 开始平滑复位...")
+                if event.key == self.KEY_MAP['debug']:
+                    robot_instance = MycobotPro630.get_instance()
+                    robot_instance.configure()
+                    self.virtual_joint_positions = np.deg2rad([
+                        0.0,  # Joint 1
+                        -131.3,  # Joint 2
+                        107.4,  # Joint 3
+                        -117.7,  # Joint 4
+                        -90.7,  # Joint 5
+                        -125.6,  # Joint 6
+                    ])
+                    self.virtual_gripper_pos = 0
+
+                self.pressed_keys.add(event.key)
             elif event.type == pygame.KEYUP:
-                key = event.key
-                self.pressed_keys.discard(key)
-                if key == self.KEY_MAP['gripper_open'] or key == self.KEY_MAP['gripper_close']:
-                    self.last_action_time.pop(key, None)
+                self.pressed_keys.discard(event.key)
 
-                movement_keys = list(self.KEY_MAP.values())
-                if key in movement_keys:
-                    ignore = [self.KEY_MAP['gripper_open'], self.KEY_MAP['gripper_close'],
-                              self.KEY_MAP['to_init'], self.KEY_MAP['stop']]
-                    remaining = [k for k in self.pressed_keys if k not in ignore]
-                    if not remaining:
-                        try:
-                            self.ec.task_stop()
-                        except:
-                            pass
-                        self.last_action_time.clear()
+        # ==========================
+        # 2. 状态更新逻辑
+        # ==========================
 
-        # =========================================================
-        # 第二部分：执行动作 (夹爪)
-        # =========================================================
-        if self.KEY_MAP['gripper_open'] in self.pressed_keys:
-            if self.KEY_MAP['gripper_open'] not in self.last_action_time or \
-                    (current_time - self.last_action_time[self.KEY_MAP['gripper_open']]) >= self.gripper_interval:
-                self.gripper_open()
-                self.last_action_time[self.KEY_MAP['gripper_open']] = current_time
+        # --- A. 平滑归位逻辑 ---
+        if self.is_resetting:
+            all_arrived = True  # 标记是否所有关节都到了
 
-        elif self.KEY_MAP['gripper_close'] in self.pressed_keys:
-            if self.KEY_MAP['gripper_close'] not in self.last_action_time or \
-                    (current_time - self.last_action_time[self.KEY_MAP['gripper_close']]) >= self.gripper_interval:
-                self.gripper_close()
-                self.last_action_time[self.KEY_MAP['gripper_close']] = current_time
+            # 关节平滑插值
+            for i in range(6):
+                target = self.initial_joint_positions[i]
+                current = self.virtual_joint_positions[i]
+                diff = target - current
 
-        # =========================================================
-        # 第三部分：笛卡尔移动逻辑
-        # =========================================================
-        should_move = False
-        active_key = None
+                # 如果差距大于步长，就走一步
+                if abs(diff) > self.reset_step_rad:
+                    all_arrived = False
+                    direction = 1.0 if diff > 0 else -1.0
+                    self.virtual_joint_positions[i] += direction * self.reset_step_rad
+                else:
+                    # 差距很小，直接吸附
+                    self.virtual_joint_positions[i] = target
 
-        for key in self.pressed_keys:
-            if key in [self.KEY_MAP['gripper_open'], self.KEY_MAP['gripper_close'], self.KEY_MAP['to_init'],
-                       self.KEY_MAP['stop']]:
-                continue
-            if key not in self.last_action_time or (current_time - self.last_action_time[key]) >= self.action_interval:
-                should_move = True
-                active_key = key
-                break
+            # 夹爪平滑插值
+            g_target = self.initial_gripper_pos
+            g_current = self.virtual_gripper_pos
+            g_diff = g_target - g_current
+            if abs(g_diff) > self.gripper_step:
+                all_arrived = False
+                g_dir = 1.0 if g_diff > 0 else -1.0
+                self.virtual_gripper_pos += g_dir * self.gripper_step
+            else:
+                self.virtual_gripper_pos = g_target
 
-        if should_move and active_key:
-            speed = self.global_speed
-            rspeed = self.rspeed
-            if active_key == self.KEY_MAP['move_x_forward']:
-                self.ec.jog_coord('X', 1, speed)
-            elif active_key == self.KEY_MAP['move_x_backward']:
-                self.ec.jog_coord('X', -1, speed)
-            elif active_key == self.KEY_MAP['move_y_right']:
-                self.ec.jog_coord('Y', -1, speed)
-            elif active_key == self.KEY_MAP['move_y_left']:
-                self.ec.jog_coord('Y', 1, speed)
-            elif active_key == self.KEY_MAP['move_z_up']:
-                self.ec.jog_coord('Z', 1, speed)
-            elif active_key == self.KEY_MAP['move_z_down']:
-                self.ec.jog_coord('Z', -1, speed)
-            elif active_key == self.KEY_MAP['rotate_rx_positive']:
-                self.ec.jog_angle('J4', -1, rspeed)
-                #self.ec.jog_coord('RX', 1, speed)
-            elif active_key == self.KEY_MAP['rotate_rx_negative']:
-                self.ec.jog_angle('J4', 1, rspeed)
-                #self.ec.jog_coord('RX', -1, speed)
-            elif active_key == self.KEY_MAP['rotate_ry_positive']:
-                self.ec.jog_angle('J6', -1, rspeed)
-                #self.ec.jog_coord('RY', -1, speed)
-            elif active_key == self.KEY_MAP['rotate_ry_negative']:
-                self.ec.jog_angle('J6', 1, rspeed)
-                #self.ec.jog_coord('RY', 1, speed)
-            elif active_key == self.KEY_MAP['rotate_rz_positive']:
-                self.ec.jog_angle('J5', 1, rspeed)
-                #self.ec.jog_coord('RZ', 1, speed)
-            elif active_key == self.KEY_MAP['rotate_rz_negative']:
-                self.ec.jog_angle('J5', -1, rspeed)
-                #self.ec.jog_coord('RZ', -1, speed)
-            self.last_action_time[active_key] = current_time
+            # 检查是否全部复位完成
+            if all_arrived:
+                self.is_resetting = False
+                print("✅ 复位完成，可继续手动控制")
 
-        # =========================================================
-        # 第四部分：返回数据 (优化后)
-        # =========================================================
+        # --- B. 手动控制逻辑 (仅在非复位状态下生效) ---
+        else:
+            # 关节 1
+            if self.KEY_MAP['j1_pos'] in self.pressed_keys: self.virtual_joint_positions[0] += self.move_step_rad
+            if self.KEY_MAP['j1_neg'] in self.pressed_keys: self.virtual_joint_positions[0] -= self.move_step_rad
+            # 关节 2
+            if self.KEY_MAP['j2_pos'] in self.pressed_keys: self.virtual_joint_positions[1] += self.move_step_rad
+            if self.KEY_MAP['j2_neg'] in self.pressed_keys: self.virtual_joint_positions[1] -= self.move_step_rad
+            # 关节 3
+            if self.KEY_MAP['j3_pos'] in self.pressed_keys: self.virtual_joint_positions[2] += self.move_step_rad
+            if self.KEY_MAP['j3_neg'] in self.pressed_keys: self.virtual_joint_positions[2] -= self.move_step_rad
+            # 关节 4
+            if self.KEY_MAP['j4_pos'] in self.pressed_keys: self.virtual_joint_positions[3] += self.move_step_rad
+            if self.KEY_MAP['j4_neg'] in self.pressed_keys: self.virtual_joint_positions[3] -= self.move_step_rad
+            # 关节 5
+            if self.KEY_MAP['j5_pos'] in self.pressed_keys: self.virtual_joint_positions[4] += self.move_step_rad
+            if self.KEY_MAP['j5_neg'] in self.pressed_keys: self.virtual_joint_positions[4] -= self.move_step_rad
+            # 关节 6
+            if self.KEY_MAP['j6_pos'] in self.pressed_keys: self.virtual_joint_positions[5] += self.move_step_rad
+            if self.KEY_MAP['j6_neg'] in self.pressed_keys: self.virtual_joint_positions[5] -= self.move_step_rad
 
-        # 【优化】不再调用 self.ec.get_angles()
-        # 而是直接使用 self.cached_angles（由后台线程更新）
-        # 这样既保证了返回值是真实的（非0），又消除了主循环的阻塞
+            # 夹爪
+            if self.KEY_MAP['gripper_close'] in self.pressed_keys: self.virtual_gripper_pos -= self.gripper_step
+            if self.KEY_MAP['gripper_open'] in self.pressed_keys: self.virtual_gripper_pos += self.gripper_step
 
-        angles_rad = np.deg2rad(self.cached_angles)
+        # ==========================
+        # 3. 范围限制 (Safety Clip)
+        # ==========================
+        for i in range(6):
+            self.virtual_joint_positions[i] = np.clip(
+                self.virtual_joint_positions[i],
+                self.joint_limits['min'][i],
+                self.joint_limits['max'][i]
+            )
 
+        self.virtual_gripper_pos = np.clip(self.virtual_gripper_pos, 0.0, 1.0)
+
+        # ==========================
+        # 4. 返回 Action
+        # ==========================
         return {
-            "joint_1.pos": float(angles_rad[0]),
-            "joint_2.pos": float(angles_rad[1]),
-            "joint_3.pos": float(angles_rad[2]),
-            "joint_4.pos": float(angles_rad[3]),
-            "joint_5.pos": float(angles_rad[4]),
-            "joint_6.pos": float(angles_rad[5]),
-            "gripper.pos": float(self.current_gripper_value / 100.0),
+            "joint_1.pos": float(self.virtual_joint_positions[0]),
+            "joint_2.pos": float(self.virtual_joint_positions[1]),
+            "joint_3.pos": float(self.virtual_joint_positions[2]),
+            "joint_4.pos": float(self.virtual_joint_positions[3]),
+            "joint_5.pos": float(self.virtual_joint_positions[4]),
+            "joint_6.pos": float(self.virtual_joint_positions[5]),
+            "gripper.pos": float(self.virtual_gripper_pos),
         }
 
     def send_feedback(self, feedback: dict[str, Any]) -> None:
-        return None
-
-    def gripper_open(self):
-        """打开夹爪"""
-        if self.current_gripper_value < 100:
-            self.current_gripper_value += self.step
-            if self.current_gripper_value > 100: self.current_gripper_value = 100
-            try:
-                self.gripper_queue.put((self.current_gripper_value, self.gripper_speed))
-            except Exception as e:
-                print(f"夹爪指令发送失败: {e}")
-
-    def gripper_close(self):
-        """关闭夹爪"""
-        if self.current_gripper_value > 0:
-            self.current_gripper_value -= self.step
-            if self.current_gripper_value < 0: self.current_gripper_value = 0
-            try:
-                self.gripper_queue.put((self.current_gripper_value, self.gripper_speed))
-            except Exception as e:
-                print(f"夹爪指令发送失败: {e}")
+        pass
