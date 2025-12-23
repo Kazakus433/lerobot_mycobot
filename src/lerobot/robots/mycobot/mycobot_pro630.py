@@ -145,7 +145,6 @@ class MycobotPro630(Robot):
 
         # --- B. 读取夹爪 ---
         obs_dict["gripper.pos"] = self.gripper.get_gripper_value() / 100.0
-        print(f"obs的gripper.pos{self.gripper.get_gripper_value() / 100.0}")
 
         # --- C. 读取相机 ---
         for cam_key, cam in self.cameras.items():
@@ -163,20 +162,16 @@ class MycobotPro630(Robot):
         # --- A. 控制机械臂 ---
         # 1. 提取目标弧度值 (Radians)
         target_rad = [action[f"joint_{i}.pos"] for i in range(1, 7)]
-        #print(f"action:{action}")
         gripper_value = int(action["gripper.pos"].item() * 100)
-        target_list = [t.item() if hasattr(t, "item") else t for t in target_rad]
-        # print(f"target_list:{target_list}")
+        #target_list = [t.item() if hasattr(t, "item") else t for t in target_rad]
         # 2. 【转换】 弧度 -> 角度 (np.rad2deg)
         # 机械臂 SDK 需要角度
         target_deg = np.rad2deg(target_rad).tolist()
-        # print(f"target_deg: {target_deg}")
 
         # 3. 发送指令
         speed = 1000
-        self.arm.write_angles(target_list, speed)
+        self.arm.write_angles(target_deg, speed)
         self.gripper.set_gripper_value(gripper_value, 100)
-        #print(f"target_deg:{target_deg}")
         # --- B. 控制夹爪 (暂时注释) ---
         # if "gripper.pos" in action:
         #    ...

@@ -25,9 +25,9 @@ class MycobotPro630Config(RobotConfig):
 
     start_position_angle = [
         0.0,  # Joint 1
-        -146.9,  # Joint 2
-        108.5,  # Joint 3
-        -80.0,  # Joint 4
+        -131.3,  # Joint 2
+        107.4,  # Joint 3
+        -117.7,  # Joint 4
         -90.7,  # Joint 5
         -125.6,  # Joint 6
     ]
