@@ -1,0 +1,2 @@
+from .config_mycobot import MycobotPro630Config
+from .mycobot_pro630 import MycobotPro630
